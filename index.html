@@ -1235,19 +1235,68 @@
 
         // Notification scheduling system
        const scheduleNotification = async (task) => {
-  if (!task.reminderOn || !task.reminderDate || !task.reminderTime) {
-    return;
-  }
+          if (!task.reminderOn || !task.reminderDate || !task.reminderTime || Notification.permission !== "granted") {
+            return;
+          }
+          let reminderDateTime = new Date(`${task.reminderDate}T${convertTimeToISO(task.reminderTime)}`);
+          let now = new Date();
+          let timeDiff = reminderDateTime.getTime() - now.getTime();
+          // only schedule notifications in the future
+          if(timeDiff < 0) {
+            return;
+          }
 
-  if ('serviceWorker' in navigator && 'PushManager' in window) {
-    const registration = await navigator.serviceWorker.ready;
-    // Send a message to the service worker to schedule the notification
-    registration.active.postMessage({
-      type: 'SCHEDULE_NOTIFICATION',
-      task: task,
-    });
-  }
-};
+          // if installed
+          if ('serviceWorker' in navigator && 'PushManager' in window) {
+            const registration = await navigator.serviceWorker.ready;
+            // Send a message to the service worker to schedule the notification
+            setTimeout(() => {
+              console.log(`Service Worker - Notification scheduling: Triggering notification for "${task.content}"`);
+              navigator.serviceWorker.ready.then((registration) => {
+                registration.showNotification(`Task Reminder: ${task.content}`, {
+                  body: `Due: ${task.dueDate ? formatDate(task.dueDate) : 'No due date'}${task.time ? '\nTime: ' + task.time : ''}`,
+                  icon: './icon-192x192.png',
+                  badge: './icon-192x192.png',
+                  vibrate: [200, 100, 200, 100, 200],
+                  requireInteraction: true,
+                  actions: [
+                    { action: 'complete', title: 'Mark Complete' },
+                    { action: 'postpone', title: 'Postpone' },
+                  ],
+                  data: {
+                    taskId: task.id,
+                    action: 'reminder'
+                  },
+                  tag: `task-reminder-${task.id}`
+                });
+              });
+            }, timeDiff);
+          } 
+          // else in browser only
+          else 
+          {
+            setTimeout(() => {
+              console.log(`Notification scheduling: Triggering notification for "${task.content}"`);
+              let notification = Notification(`Task Reminder: ${task.content}`, {
+                body: `Due: ${task.dueDate ? formatDate(task.dueDate) : 'No due date'}${task.time ? '\nTime: ' + task.time : ''}`,
+                icon: './icon-192x192.png',
+                badge: './icon-192x192.png',
+                vibrate: [200, 100, 200, 100, 200],
+                requireInteraction: true,
+                actions: [
+                  { action: 'complete', title: 'Mark Complete' },
+                  { action: 'postpone', title: 'Postpone' },
+                ],
+                data: {
+                  taskId: task.id,
+                  action: 'reminder'
+                },
+                tag: `task-reminder-${task.id}`
+              });
+              notification.showNotification();
+            }, timeDiff);
+          }
+        };
 
 
         // Convert time formats like "2:30 PM" to "14:30"

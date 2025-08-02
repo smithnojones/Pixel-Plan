@@ -211,44 +211,6 @@ self.addEventListener("push", (event) => {
 });
 
 
-// *** NEW *** Handle scheduled notifications from the app
-self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SCHEDULE_NOTIFICATION') {
-    const task = event.data.task;
-    console.log('Service Worker: Received task to schedule notification', task);
-
-    const reminderDateTime = new Date(`${task.reminderDate}T${convertTimeToISO(task.reminderTime)}`);
-    const now = new Date();
-    const timeDiff = reminderDateTime.getTime() - now.getTime();
-
-    if (timeDiff > 0) {
-      console.log(`Service Worker: Scheduling notification for "${task.content}" in ${timeDiff}ms`);
-      setTimeout(() => {
-        console.log(`Service Worker: Triggering notification for "${task.content}"`);
-        self.registration.showNotification(`Task Reminder: ${task.content}`, {
-          body: `Due: ${task.dueDate ? formatDate(task.dueDate) : 'No due date'}${task.time ? '\nTime: ' + task.time : ''}`,
-          icon: './icon-192x192.png',
-          badge: './icon-192x192.png',
-          vibrate: [200, 100, 200, 100, 200],
-          requireInteraction: true,
-          actions: [
-            { action: 'complete', title: 'Mark Complete' },
-            { action: 'postpone', title: 'Postpone' },
-          ],
-          data: {
-            taskId: task.id,
-            action: 'reminder'
-          },
-          tag: `task-reminder-${task.id}`
-        });
-      }, timeDiff);
-    } else {
-        console.log(`Service Worker: Notification for "${task.content}" is in the past. Not scheduling.`);
-    }
-  }
-});
-
-
 // Handle notification click
 self.addEventListener("notificationclick", (event) => {
   console.log("Service Worker: Notification click received", event.action);
