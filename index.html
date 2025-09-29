@@ -284,149 +284,73 @@
 
       // Multi-layer persistence storage functions
       const Storage = {
-        // Save to both IndexedDB and localStorage for redundancy
-        async saveWithBackup(key, data) {
+        // Save to IndexedDB
+        async saveToDb(key, data) {
           const serialized = JSON.stringify(data);
           try {
             // Primary storage: IndexedDB
             await saveToIDB(key, data);
-            // Backup storage: localStorage with compression
-            localStorage.setItem(`backup-${key}`, serialized);
-            // Additional backup with timestamp
-            localStorage.setItem(`backup-${key}-${Date.now()}`, serialized);
             return true;
           } catch (error) {
-            console.error(`Failed to save ${key}:`, error);
-            // Fallback to localStorage only
-            try {
-              localStorage.setItem(`backup-${key}`, serialized);
-              return true;
-            } catch (lsError) {
-              console.error(
-                `LocalStorage fallback failed for ${key}:`,
-                lsError,
-              );
-              return false;
-            }
+            console.error(`Save failed for ${key}`, error);
+            alert(`Save failed for ${key}` + error.message);
           }
         },
 
-        // Load from IndexedDB first, fallback to localStorage
-        async loadWithBackup(key, defaultValue = null) {
+        // Load from IndexedDB
+        async loadFromDb(key, defaultValue = null) {
           try {
             // Try IndexedDB first
             const idbData = await loadFromIDB(key, null);
-            if (idbData !== null) {
-              // Save to localStorage backup for next time
-              localStorage.setItem(`backup-${key}`, JSON.stringify(idbData));
-              return idbData;
-            }
+            return idbData;
           } catch (error) {
-            console.warn(`IndexedDB load failed for ${key}:`, error);
-          }
-
-          // Fallback to localStorage backup
-          try {
-            const backupData = localStorage.getItem(`backup-${key}`);
-            if (backupData) {
-              const parsed = JSON.parse(backupData);
-              // Restore to IndexedDB
-              try {
-                await saveToIDB(key, parsed);
-              } catch (restoreError) {
-                console.warn(
-                  `Failed to restore ${key} to IndexedDB:`,
-                  restoreError,
-                );
-              }
-              return parsed;
-            }
-          } catch (error) {
-            console.warn(`LocalStorage backup load failed for ${key}:`, error);
-          }
-
-          // Try emergency backups
-          try {
-            const emergencyKey = `emergency-backup-${key}`;
-            const emergencyData = localStorage.getItem(emergencyKey);
-            if (emergencyData) {
-              const parsed = JSON.parse(emergencyData);
-              const timestamp = localStorage.getItem('emergency-backup-timestamp');
-              console.log(
-                `Restored ${key} from emergency backup (timestamp: ${timestamp})`,
-              );
-              // Clear emergency backup after successful restore
-              localStorage.removeItem(emergencyKey);
-              return parsed;
-            }
-          } catch (error) {
-            console.warn(`Emergency backup load failed for ${key}:`, error);
-          }
-
-          // Try timestamped backups as last resort
-          try {
-            const keys = Object.keys(localStorage).filter((k) =>
-              k.startsWith(`backup-${key}-`),
-            );
-            if (keys.length > 0) {
-              // Get the most recent backup
-              const latestKey = keys.sort().pop();
-              const backupData = localStorage.getItem(latestKey);
-              if (backupData) {
-                const parsed = JSON.parse(backupData);
-                console.log(
-                  `Restored ${key} from timestamped backup: ${latestKey}`,
-                );
-                return parsed;
-              }
-            }
-          } catch (error) {
-            console.warn(`Timestamped backup load failed for ${key}:`, error);
+            console.error(`Load failed for ${key}`, error);
+            alert(`Load failed for ${key}` + error.message);
           }
 
           return defaultValue;
         },
 
         async getTasks() {
-          return await this.loadWithBackup(STORES.TASKS, []);
+          return await this.loadFromDb(STORES.TASKS, []);
         },
 
         async setTasks(tasks) {
-          return await this.saveWithBackup(STORES.TASKS, tasks);
+          return await this.saveToDb(STORES.TASKS, tasks);
         },
 
         async getCategories() {
-          return await this.loadWithBackup(STORES.CATEGORIES, []);
+          return await this.loadFromDb(STORES.CATEGORIES, []);
         },
 
         async setCategories(categories) {
-          return await this.saveWithBackup(STORES.CATEGORIES, categories);
+          return await this.saveToDb(STORES.CATEGORIES, categories);
         },
 
         async getCustomIcons() {
-          return await this.loadWithBackup(STORES.CUSTOM_ICONS, []);
+          return await this.loadFromDb(STORES.CUSTOM_ICONS, []);
         },
 
         async setCustomIcons(icons) {
-          return await this.saveWithBackup(STORES.CUSTOM_ICONS, icons);
+          return await this.saveToDb(STORES.CUSTOM_ICONS, icons);
         },
 
         async getAttributions() {
-          return await this.loadWithBackup(STORES.ATTRIBUTIONS, []);
+          return await this.loadFromDb(STORES.ATTRIBUTIONS, []);
         },
 
         async setAttributions(attributions) {
-          return await this.saveWithBackup(STORES.ATTRIBUTIONS, attributions);
+          return await this.saveToDb(STORES.ATTRIBUTIONS, attributions);
         },
 
         async getSettings() {
-          return await this.loadWithBackup(STORES.SETTINGS, {});
+          return await this.loadFromDb(STORES.SETTINGS, {});
         },
 
         async setSetting(key, value) {
           const settings = await this.getSettings();
           settings[key] = value;
-          return await this.saveWithBackup(STORES.SETTINGS, settings);
+          return await this.saveToDb(STORES.SETTINGS, settings);
         },
 
         async getSetting(key, defaultValue = null) {
@@ -474,24 +398,10 @@
           }
         },
 
-        // Clean up old timestamped backups (keep last 3)
-        cleanupOldBackups() {
+        // Clean up any backup data from earlier versions
+        cleanupLocalStore() {
           try {
-            Object.keys(STORES).forEach((store) => {
-              const keys = Object.keys(localStorage)
-                .filter((k) => k.startsWith(`backup-${store}-`))
-                .sort();
-
-              // Keep only the 3 most recent backups
-              if (keys.length > 3) {
-                keys.slice(0, -3).forEach((key) => {
-                  localStorage.removeItem(key);
-                });
-              }
-            });
-
-            // Also clean up automatic backups
-            this.cleanupAutomaticBackups();
+            localStorage.clear();
           } catch (error) {
             console.warn("Failed to cleanup old backups:", error);
           }
@@ -511,18 +421,10 @@
               backupType: "automatic",
             };
             const timestamp = Date.now();
-            const backupKey = `auto-backup-${timestamp}`;
             const exportData = JSON.stringify(allData, null, 2);
-
-            // Store in localStorage for immediate access
-            localStorage.setItem(backupKey, exportData);
 
             // Download to device for persistent storage
             await this.downloadBackupFile(exportData, timestamp);
-
-            console.log(
-              `Automatic backup created and downloaded: ${backupKey}`,
-            );
             return true;
           } catch (error) {
             console.error("Failed to create automatic backup:", error);
@@ -556,63 +458,6 @@
           } catch (error) {
             console.error("Failed to download backup file:", error);
             return false;
-          }
-        },
-
-        // Get list of automatic backups
-        getAutomaticBackups() {
-          try {
-            const backupKeys = Object.keys(localStorage)
-              .filter((k) => k.startsWith("auto-backup-"))
-              .sort()
-              .reverse(); // Most recent first
-
-            return backupKeys.map((key) => {
-              const timestamp = parseInt(key.replace("auto-backup-", ""));
-              const date = new Date(timestamp);
-              return {
-                key,
-                timestamp,
-                date: date.toLocaleString(),
-                size: localStorage.getItem(key)?.length || 0,
-              };
-            });
-          } catch (error) {
-            console.error("Failed to get automatic backups:", error);
-            return [];
-          }
-        },
-
-        // Import from automatic backup
-        async importAutomaticBackup(backupKey) {
-          try {
-            const backupData = localStorage.getItem(backupKey);
-            if (!backupData) {
-              throw new Error("Backup not found");
-            }
-            return await this.importAllData(backupData);
-          } catch (error) {
-            console.error("Failed to import automatic backup:", error);
-            return false;
-          }
-        },
-
-        // Clean up automatic backups (keep last 3)
-        cleanupAutomaticBackups() {
-          try {
-            const backupKeys = Object.keys(localStorage)
-              .filter((k) => k.startsWith("auto-backup-"))
-              .sort();
-
-            // Keep only the 3 most recent backups
-            if (backupKeys.length > 3) {
-              backupKeys.slice(0, -3).forEach((key) => {
-                localStorage.removeItem(key);
-                console.log(`Removed old automatic backup: ${key}`);
-              });
-            }
-          } catch (error) {
-            console.warn("Failed to cleanup automatic backups:", error);
           }
         },
       };
@@ -1047,11 +892,11 @@
             try {
               console.log("Loading app data with robust recovery...");
 
-              // Clean up old backups first
-              Storage.cleanupOldBackups();
-
               // Migrate data from localStorage if needed
               await migrateFromLocalStorage();
+
+              // Clean up any left over data in localstore
+              Storage.cleanupLocalStore();
 
               // Load all data with backup fallback
               const [
@@ -1118,67 +963,15 @@
 
               setDataLoaded(true);
 
-              // Show recovery message if data was restored from backup
-              const hasBackupData =
-                localStorage.getItem("backup-tasks") ||
-                localStorage.getItem("backup-categories") ||
-                Object.keys(localStorage).some((k) => k.startsWith("backup-"));
-
-              if (
-                hasBackupData &&
-                (savedTasks.length > 0 || savedCategories.length > 0)
-              ) {
-                console.log("Data successfully recovered from backup storage");
-              }
             } catch (error) {
-              console.error("Error loading app data:", error);
+              console.error("Error, data has been reset due to an issue loading app data.", error);
+              alert("Error, data has been reset due to an issue loading app data. \nPlease restore from a backup in your downloads folder.");
 
-              // Enhanced fallback with backup attempt
-              try {
-                console.log("Attempting backup recovery...");
-                const backupTasks = localStorage.getItem("backup-tasks");
-                const backupCategories =
-                  localStorage.getItem("backup-categories");
-
-                let recoveredFromBackup = false;
-
-                if (backupTasks) {
-                  const tasks = JSON.parse(backupTasks);
-                  setTasks(Array.isArray(tasks) && tasks.length > 0 ? tasks : initialTasks);
-                  console.log("Tasks recovered from backup");
-                  if (Array.isArray(tasks) && tasks.length > 0) recoveredFromBackup = true;
-                } else {
-                  setTasks(initialTasks);
-                }
-
-                if (backupCategories) {
-                  const categories = JSON.parse(backupCategories);
-                  setCategories(
-                    Array.isArray(categories) && categories.length > 0 ? categories : defaultCategories,
-                  );
-                  console.log("Categories recovered from backup");
-                  if (Array.isArray(categories) && categories.length > 0) recoveredFromBackup = true;
-                } else {
-                  setCategories(defaultCategories);
-                }
-
-                setCustomIcons([]);
-                setAttributions([]);
-
-                // Show recovery notification
-                if (recoveredFromBackup) {
-                  setTimeout(() => {
-                    triggerToast("👍 Your data was recovered from backup!");
-                  }, 1000);
-                }
-              } catch (backupError) {
-                console.error("Backup recovery also failed:", backupError);
-                // Ultimate fallback to defaults
-                setTasks(initialTasks);
-                setCategories(defaultCategories);
-                setCustomIcons([]);
-                setAttributions([]);
-              }
+              // fallback to inialised data
+              setTasks(initialTasks);
+              setCategories(defaultCategories);
+              setCustomIcons([]);
+              setAttributions([]);
 
               setDataLoaded(true);
             }
@@ -1192,7 +985,6 @@
               // Create automatic backup with timestamp
               console.log("Creating automatic backup...");
               await Storage.createAutomaticBackup();
-              Storage.cleanupOldBackups();
               console.log(
                 "✅ Automatic backup created, downloaded to device, and cleanup completed",
               );
@@ -1557,9 +1349,6 @@
           setPage("tasks");
         };
 
-        // Track pending saves to ensure they complete before app closes
-        const pendingSaves = useRef(new Set());
-
         // Notification scheduling system
         const notificationTimeouts = useRef(new Map());
         const [notificationPermission, setNotificationPermission] = useState(Notification.permission);
@@ -1581,173 +1370,6 @@
             return false;
           }
         };
-
-        // Auto-save data to IndexedDB when state changes with improved error handling
-        useEffect(() => {
-          if (dataLoaded) {
-            const saveId = `tasks-${Date.now()}`;
-            pendingSaves.current.add(saveId);
-            console.log("Saving tasks to IndexedDB:", tasks);
-
-            Storage.setTasks(tasks)
-              .then((result) => {
-                console.log("Tasks saved:", result);
-                pendingSaves.current.delete(saveId);
-              })
-              .catch((error) => {
-                console.error("Failed to save tasks:", error);
-                pendingSaves.current.delete(saveId);
-                // Fallback to localStorage on IndexedDB failure
-                try {
-                  localStorage.setItem('emergency-backup-tasks', JSON.stringify(tasks));
-                  console.log("Tasks emergency backup saved to localStorage");
-                } catch (lsError) {
-                  console.error("Emergency backup also failed:", lsError);
-                }
-              });
-          }
-        }, [tasks, dataLoaded]);
-
-        useEffect(() => {
-          if (dataLoaded) {
-            const saveId = `categories-${Date.now()}`;
-            pendingSaves.current.add(saveId);
-            console.log("Saving categories to IndexedDB:", categories);
-
-            Storage.setCategories(categories)
-              .then((result) => {
-                console.log("Categories saved:", result);
-                pendingSaves.current.delete(saveId);
-              })
-              .catch((error) => {
-                console.error("Failed to save categories:", error);
-                pendingSaves.current.delete(saveId);
-                try {
-                  localStorage.setItem('emergency-backup-categories', JSON.stringify(categories));
-                  console.log("Categories emergency backup saved to localStorage");
-                } catch (lsError) {
-                  console.error("Emergency backup also failed:", lsError);
-                }
-              });
-          }
-        }, [categories, dataLoaded]);
-
-        useEffect(() => {
-          if (dataLoaded) {
-            const saveId = `customIcons-${Date.now()}`;
-            pendingSaves.current.add(saveId);
-            console.log("Saving custom icons to IndexedDB:", customIcons);
-
-            Storage.setCustomIcons(customIcons)
-              .then((result) => {
-                console.log("Custom icons saved:", result);
-                pendingSaves.current.delete(saveId);
-              })
-              .catch((error) => {
-                console.error("Failed to save custom icons:", error);
-                pendingSaves.current.delete(saveId);
-                try {
-                  localStorage.setItem('emergency-backup-customIcons', JSON.stringify(customIcons));
-                  console.log("Custom icons emergency backup saved to localStorage");
-                } catch (lsError) {
-                  console.error("Emergency backup also failed:", lsError);
-                }
-              });
-          }
-        }, [customIcons, dataLoaded]);
-
-        useEffect(() => {
-          if (dataLoaded) {
-            const saveId = `attributions-${Date.now()}`;
-            pendingSaves.current.add(saveId);
-            console.log("Saving attributions to IndexedDB:", attributions);
-
-            Storage.setAttributions(attributions)
-              .then((result) => {
-                console.log("Attributions saved:", result);
-                pendingSaves.current.delete(saveId);
-              })
-              .catch((error) => {
-                console.error("Failed to save attributions:", error);
-                pendingSaves.current.delete(saveId);
-                try {
-                  localStorage.setItem('emergency-backup-attributions', JSON.stringify(attributions));
-                  console.log("Attributions emergency backup saved to localStorage");
-                } catch (lsError) {
-                  console.error("Emergency backup also failed:", lsError);
-                }
-              });
-          }
-        }, [attributions, dataLoaded]);
-
-        // Add beforeunload handler to save data when app is closing
-        useEffect(() => {
-          const handleBeforeUnload = async (event) => {
-            console.log("App is closing, attempting to save data...");
-
-            // Check if there are pending saves
-            if (pendingSaves.current.size > 0) {
-              console.log(`Warning: ${pendingSaves.current.size} saves still pending`);
-            }
-
-            // Force immediate save with limited time
-            try {
-              // Use a Promise.race to timeout after 2 seconds
-              const savePromise = forceImmediateSave();
-              const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(false), 2000));
-
-              const result = await Promise.race([savePromise, timeoutPromise]);
-
-              if (result) {
-                console.log("✅ Data saved successfully before app close");
-              } else {
-                console.log("⚠️ Save timed out, using emergency backup");
-                // Emergency backup to localStorage
-                localStorage.setItem('emergency-backup-tasks', JSON.stringify(tasks));
-                localStorage.setItem('emergency-backup-categories', JSON.stringify(categories));
-                localStorage.setItem('emergency-backup-customIcons', JSON.stringify(customIcons));
-                localStorage.setItem('emergency-backup-attributions', JSON.stringify(attributions));
-                localStorage.setItem('emergency-backup-timestamp', Date.now().toString());
-              }
-            } catch (error) {
-              console.error("Error during beforeunload save:", error);
-              // Final emergency backup
-              try {
-                localStorage.setItem('emergency-backup-tasks', JSON.stringify(tasks));
-                localStorage.setItem('emergency-backup-categories', JSON.stringify(categories));
-                localStorage.setItem('emergency-backup-timestamp', Date.now().toString());
-              } catch (emergencyError) {
-                console.error("Emergency backup failed:", emergencyError);
-              }
-            }
-          };
-
-          const handleVisibilityChange = () => {
-            if (document.visibilityState === 'hidden') {
-              console.log("Page hidden, saving data...");
-              forceImmediateSave().catch(error =>
-                console.error("Save on visibility change failed:", error)
-              );
-            }
-          };
-
-          window.addEventListener('beforeunload', handleBeforeUnload);
-          document.addEventListener('visibilitychange', handleVisibilityChange);
-
-          // Also save on page focus loss (additional safety net)
-          window.addEventListener('blur', () => {
-            console.log("Window lost focus, saving data...");
-            forceImmediateSave().catch(error =>
-              console.error("Save on blur failed:", error)
-            );
-          });
-
-          return () => {
-            window.removeEventListener('beforeunload', handleBeforeUnload);
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-            window.removeEventListener('blur', forceImmediateSave);
-          };
-        }, [tasks, categories, customIcons, attributions, dataLoaded]);
 
         const triggerToast = (message) => {
           setToastMessage(message);
@@ -1771,10 +1393,8 @@
             console.log("✅ New task saved immediately");
             triggerToast("Task added successfully!");
           } catch (error) {
-            console.error("Failed to save new task immediately:", error);
-            // Emergency backup
-            localStorage.setItem('emergency-backup-tasks', JSON.stringify(newTasks));
-            triggerToast("Task added (backup saved)!");
+            console.error("Failed to save new task:", error);
+            alert("Task failed during saving: " + error.message);
           }
 
           setPage("tasks");
@@ -1799,9 +1419,7 @@
             triggerToast("Task updated successfully!");
           } catch (error) {
             console.error("Failed to save updated task immediately:", error);
-            // Emergency backup
-            localStorage.setItem('emergency-backup-tasks', JSON.stringify(newTasks));
-            triggerToast("Task updated (backup saved)!");
+            alert("Failed to update task: " + error.message);
           }
 
           setEditingTask(null);
@@ -1891,13 +1509,11 @@
 
             // Force immediate save when task completion changes
             try {
-                await Storage.setTasks(finalTasks);
-                console.log("✅ Task completion change saved immediately");
+              await Storage.setTasks(finalTasks);
+              console.log("✅ Task completion change saved immediately");
             } catch (error) {
-                console.error("Failed to save task completion change immediately:", error);
-                // Emergency backup
-                localStorage.setItem('emergency-backup-tasks', JSON.stringify(finalTasks));
-                localStorage.setItem('emergency-backup-timestamp', Date.now().toString());
+              console.error("Failed to save task completion change immediately:", error);
+              alert("Task failed to update: " + error.message);
             }
         };
 
@@ -1939,8 +1555,7 @@
             triggerToast("Task postponed to tomorrow!");
           } catch (error) {
             console.error("Failed to save task postpone immediately:", error);
-            localStorage.setItem('emergency-backup-tasks', JSON.stringify(newTasks));
-            triggerToast("Task postponed (backup saved)!");
+            alert("Task failed to be postponed: " + error.message);
           }
         };
 
@@ -1955,8 +1570,7 @@
             triggerToast("Task deleted.");
           } catch (error) {
             console.error("Failed to save task deletion immediately:", error);
-            localStorage.setItem('emergency-backup-tasks', JSON.stringify(newTasks));
-            triggerToast("Task deleted (backup saved).");
+            alert("Task deletion failed");
           }
         };
 
@@ -4014,59 +3628,11 @@ const renderPage = () => {
         const [showImportBox, setShowImportBox] = useState(false);
         const [importData, setImportData] = useState("");
         const [lastBackupDate, setLastBackupDate] = useState(null);
-        const [storageHealth, setStorageHealth] = useState({
-          status: "checking",
-          backups: 0,
-        });
         const [automaticBackups, setAutomaticBackups] = useState([]);
-        const [showAutomaticBackups, setShowAutomaticBackups] = useState(false);
+        const [showAutomaticBackups] = useState(false);
 
         useEffect(() => {
           setPermissionStatus(Notification.permission);
-
-          const checkStorageHealth = () => {
-            try {
-              const backupKeys = Object.keys(localStorage).filter((k) =>
-                k.startsWith("backup-tasks-"),
-              );
-              const hasMainBackups =
-                localStorage.getItem("backup-tasks") &&
-                localStorage.getItem("backup-categories");
-
-              // Load automatic backups
-              const autoBackups = Storage.getAutomaticBackups();
-              setAutomaticBackups(autoBackups);
-
-              if (backupKeys.length > 0) {
-                const latestKey = backupKeys.sort().pop();
-                const timestamp = latestKey.split("-").pop();
-                setLastBackupDate(new Date(parseInt(timestamp)));
-              } else if (autoBackups.length > 0) {
-                // Use latest automatic backup date if no timestamped backups
-                setLastBackupDate(new Date(autoBackups[0].timestamp));
-              }
-
-              setStorageHealth({
-                status:
-                  hasMainBackups || autoBackups.length > 0
-                    ? "healthy"
-                    : backupKeys.length > 0
-                      ? "partial"
-                      : "none",
-                backups:
-                  backupKeys.length +
-                  (hasMainBackups ? 2 : 0) +
-                  autoBackups.length,
-              });
-            } catch (error) {
-              setStorageHealth({ status: "error", backups: 0 });
-            }
-          };
-
-          checkStorageHealth();
-          // Recheck every 10 seconds
-          const interval = setInterval(checkStorageHealth, 10000);
-          return () => clearInterval(interval);
         }, []);
 
         const requestNotificationPermission = async () => {
@@ -4168,7 +3734,7 @@ const renderPage = () => {
             const success = await Storage.importAllData(importData);
             if (success) {
               alert(
-                "Data imported successfully! Please refresh the page to see changes.",
+                "🥳 Data imported successfully! Page will now refresh the page to load the changes.",
               );
               setImportData("");
               setShowImportBox(false);
@@ -4194,30 +3760,10 @@ const renderPage = () => {
           }
         };
 
-        const handleImportAutomaticBackup = async (backupKey) => {
-          try {
-            const success = await Storage.importAutomaticBackup(backupKey);
-            if (success) {
-              alert(
-                "Automatic backup imported successfully! Please refresh the page to see changes.",
-              );
-              window.location.reload();
-            } else {
-              alert("Failed to import automatic backup.");
-            }
-          } catch (error) {
-            console.error("Import automatic backup failed:", error);
-            alert("Import failed: " + error.message);
-          }
-        };
-
         const handleCreateManualBackup = async () => {
           try {
             const success = await Storage.createAutomaticBackup();
             if (success) {
-              // Refresh the automatic backups list
-              const autoBackups = Storage.getAutomaticBackups();
-              setAutomaticBackups(autoBackups);
               alert(
                 "Manual backup created and downloaded to your Downloads folder!",
               );
@@ -4325,34 +3871,6 @@ const renderPage = () => {
                   Data Backup & Restore
                 </h3>
 
-                {/* Storage Health Status */}
-                <div
-                  className={`mb-3 p-3 rounded-lg border ${
-                    storageHealth.status === "healthy"
-                      ? "bg-green-50 border-green-200 text-green-800"
-                      : storageHealth.status === "partial"
-                        ? "bg-yellow-50 border-yellow-200 text-yellow-800"
-                        : storageHealth.status === "none"
-                          ? "bg-red-50 border-red-200 text-red-800"
-                          : "bg-gray-50 border-gray-200 text-gray-800"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">
-                      {storageHealth.status === "healthy"
-                        ? "✅ Storage Healthy"
-                        : storageHealth.status === "partial"
-                          ? "⚠️ Partial Backups"
-                          : storageHealth.status === "none"
-                            ? "❌ No Backups Found"
-                            : "🔄 Checking..."}
-                    </span>
-                    <span className="text-xs">
-                      {storageHealth.backups} backups
-                    </span>
-                  </div>
-                </div>
-
                 {lastBackupDate && (
                   <p className="text-sm text-gray-600 mb-2">
                     Last backup: {lastBackupDate.toLocaleString()}
@@ -4422,81 +3940,6 @@ const renderPage = () => {
                 </div>
 
                 {/* Automatic Backups Section */}
-                <div className="mt-4">
-                  <button
-                    onClick={() =>
-                      setShowAutomaticBackups(!showAutomaticBackups)
-                    }
-                    className="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded-lg transition-colors flex items-center justify-between"
-                  >
-                    <span>
-                      🔄 Automatic Backups ({automaticBackups.length})
-                    </span>
-                    <span className="text-sm">
-                      {showAutomaticBackups ? "Hide" : "Show"}
-                    </span>
-                  </button>
-
-                  {showAutomaticBackups && (
-                    <div className="mt-3 p-3 border border-gray-300 rounded-lg bg-gray-50">
-                      <div className="mb-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-sm text-gray-600">
-                            The app creates automatic backups every 30 minutes
-                            and downloads them to your device.
-                          </p>
-                          <button
-                            onClick={handleCreateManualBackup}
-                            className="bg-blue-500 hover:bg-blue-600 text-white text-xs py-1 px-2 rounded transition-colors whitespace-nowrap ml-2"
-                          >
-                            Create Now
-                          </button>
-                        </div>
-                        <div className="p-2 bg-green-50 border border-green-200 rounded text-xs text-green-700">
-                          💾 <strong>Persistent Storage:</strong> Backup files
-                          are automatically downloaded to your Downloads folder
-                          with names like
-                          "pixelplan-auto-backup-YYYY-MM-DD-HH-MM-SS.json".
-                          These survive cache clears! Keep only the 3 most
-                          recent files.
-                        </div>
-                      </div>
-                      {automaticBackups.length > 0 ? (
-                        <div className="space-y-2">
-                          {automaticBackups.map((backup) => (
-                            <div
-                              key={backup.key}
-                              className="flex items-center justify-between p-2 bg-white rounded border"
-                            >
-                              <div className="flex-1">
-                                <div className="text-sm font-medium text-gray-700">
-                                  {backup.date}
-                                </div>
-                                <div className="text-xs text-gray-500">
-                                  Size: {Math.round(backup.size / 1024)}KB
-                                </div>
-                              </div>
-                              <button
-                                onClick={() =>
-                                  handleImportAutomaticBackup(backup.key)
-                                }
-                                className="bg-green-500 hover:bg-green-600 text-white text-xs py-1 px-2 rounded transition-colors"
-                              >
-                                Restore
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-gray-500 italic">
-                          No automatic backups found yet. The first backup will
-                          be created within 30 minutes.
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-
                 <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                   <p className="text-sm text-blue-800">
                     💾 <strong>Automatic Protection:</strong> Your data is
