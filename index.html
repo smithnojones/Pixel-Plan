@@ -301,7 +301,7 @@
         async loadFromDb(key, defaultValue = null) {
           try {
             // Try IndexedDB first
-            const idbData = await loadFromIDB(key, null);
+            const idbData = await loadFromIDB(key, defaultValue);
             return idbData;
           } catch (error) {
             console.error(`Load failed for ${key}`, error);
